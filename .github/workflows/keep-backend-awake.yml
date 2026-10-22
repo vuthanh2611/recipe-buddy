@@ -1,0 +1,25 @@
+# Recipe Buddy backend (Supabase free plan) pauses after 7 days without requests.
+# This pings it once a day so testers never find it asleep. Run it by hand from the Actions tab too.
+# Needs the repository secret SUPABASE_ANON_KEY (Settings → Secrets and variables → Actions):
+# the project's public anon key, the same one inside the app.
+name: Keep backend awake
+on:
+  schedule:
+    - cron: '17 9 * * *' # every day, 09:17 UTC
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      URL: https://cvwldfhqhfqyuamhztyb.supabase.co
+      KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - name: Ping the database API and the auth service
+        run: |
+          test -n "$KEY" || { echo "Add the SUPABASE_ANON_KEY secret first."; exit 1; }
+          db=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/rest/v1/ai_features?select=fn&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          auth=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/auth/v1/health" -H "apikey: $KEY")
+          echo "database API: HTTP $db (401 is fine: the query reached Postgres), auth: HTTP $auth"
+          # 5xx or no answer (000) means the backend is down or paused: fail so GitHub emails the owner.
+          test "$db" != "000" && test "$db" -lt 500 && test "$auth" = "200"
